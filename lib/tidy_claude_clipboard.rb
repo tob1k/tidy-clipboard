@@ -29,7 +29,7 @@ module TidyClaudeClipboard
 
     # Strip Claude-specific markers: ⏺ (paragraph) and ▎ (blockquote → >)
     def clean(text)
-      text.gsub(/^⏺ ?/, "")
+      text.gsub(/^[ \t]*⏺ ?/, "")
           .gsub(/^[ \t]*▎ ?/, "> ")
     end
 
@@ -62,23 +62,24 @@ module TidyClaudeClipboard
     end
 
     # Rejoin hard-wrapped continuation lines to their parent element.
-    # Uses slice_before to cut at each new structural element (blank line,
-    # list item, blockquote, code), then joins each group into one line.
+    # Uses slice_when to cut between lines where either the current line
+    # starts a new element OR the previous line was blank (blank lines
+    # are separators, not parents that own continuations).
     def rejoin(text)
       text.each_line(chomp: true)
-          .slice_before { |line| new_element?(line) }
+          .slice_when { |prev, curr| prev.strip.empty? || new_element?(curr) }
           .map { |group| join_group(group) }
           .join("\n")
     end
 
-    # A line starts a new element if it's blank, a list item,
-    # a blockquote, or indented code. Everything else is a continuation.
+    # A line starts a new element if it's a list item, blockquote, or code.
     def new_element?(line)
       line.strip.empty? || line.match?(LIST_ITEM) || line.match?(BLOCKQUOTE) || line.match?(CODE_INDENT)
     end
 
     # Collapse a group of lines into a single element.
-    # Code blocks preserve their line structure; everything else joins with spaces.
+    # Blank lines become empty strings. Code blocks preserve their
+    # line structure. Everything else joins with spaces.
     def join_group(group)
       return "" if group.first.strip.empty?
       return group.join("\n") if group.first.match?(CODE_INDENT)
