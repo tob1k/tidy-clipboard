@@ -3,91 +3,72 @@
 module TidyClaudeClipboard
   VERSION = "0.1.0"
 
+  LIST_ITEM = /\A\s*(?:[-*]|\d+\.)\s/
+  BLOCKQUOTE = /\A\s*> /
+  CODE_INDENT = /\A(?:    |\t)/
+
   def self.tidy(text)
-    cleaned = strip_claude_markers(text)
-    dedented = dedent(cleaned)
-    process_blocks(dedented)
+    text.then { clean(_1) }
+        .then { dedent(_1) }
+        .then { rejoin(_1) }
   end
 
   private
 
-  def self.strip_claude_markers(text)
+  def self.clean(text)
     text.gsub(/^⏺ ?/, "")
-      .gsub(/^(\s*)▎ ?/, '\1> ')
+        .gsub(/^(\s*)▎ ?/, '\1> ')
   end
 
   def self.dedent(text)
     lines = text.lines
-    indents = lines
+    indent = lines
       .reject { |l| l.strip.empty? }
-      .map { |l| l[/\A */].length }
-      .select(&:positive?)
+      .filter_map { |l| l[/\A */].length.then { _1 if _1.positive? } }
+      .min || 0
 
-    indent = indents.min || 0
     return text if indent.zero?
 
     lines.map { |l| l.strip.empty? ? "\n" : l.sub(/^ {0,#{indent}}/, "") }.join
   end
 
-  def self.process_blocks(text)
-    blocks = text.split(/\n{2,}/)
-    blocks.map { |block| tidy_block(block) }.join("\n\n")
-  end
+  def self.rejoin(text)
+    elements = []
 
-  def self.tidy_block(block)
-    lines = block.lines.map(&:chomp)
-    lines.reject! { |l| l.strip.empty? }
-    return "" if lines.empty?
-
-    return block.chomp if code_block?(lines)
-    return rejoin_list(lines) if list_block?(lines)
-    return rejoin_blockquote(lines) if blockquote_block?(lines)
-
-    lines.join(" ").squeeze(" ")
-  end
-
-  def self.rejoin_list(lines)
-    items = []
-    lines.each do |line|
-      if line.match?(/\A\s*(?:[-*]|\d+\.)\s/) || items.empty?
-        items << line
+    text.each_line(chomp: true) do |line|
+      if line.strip.empty?
+        elements << :break unless elements.last == :break
+      elsif line.match?(BLOCKQUOTE) && elements.last&.match?(BLOCKQUOTE)
+        elements[-1] += " #{line.sub(BLOCKQUOTE, '').strip}"
+      elsif continuation?(line, elements)
+        elements[-1] += " #{line.strip}"
       else
-        items[-1] = "#{items[-1]} #{line.strip}"
+        elements << line
       end
     end
 
-    # Double-space between top-level items, single-space nested
-    result = [items.first]
-    items.drop(1).each do |item|
-      nested = item.match?(/\A\s+/)
-      result << (nested ? item : "\n#{item}")
-    end
-    result.join("\n")
-  end
-
-  def self.rejoin_blockquote(lines)
-    # Join consecutive > lines into single blockquotes
-    result = []
-    lines.each do |line|
-      content = line.sub(/\A\s*> /, "")
-      if result.empty?
-        result << "> #{content}"
+    # Double-space between top-level list items
+    elements.flat_map.with_index do |el, i|
+      prev_top = elements[0...i].reverse.find { |e| e == :break || top_level_list_item?(e) }
+      if top_level_list_item?(el) && top_level_list_item?(prev_top)
+        [:break, el]
       else
-        result[-1] = "#{result[-1]} #{content}"
+        [el]
       end
     end
-    result.join("\n")
+    .map { _1 == :break ? "" : _1 }
+    .join("\n")
   end
 
-  def self.blockquote_block?(lines)
-    lines.first&.match?(/\A\s*> /)
+  def self.continuation?(line, elements)
+    return false if elements.empty? || elements.last == :break
+    return false if line.match?(LIST_ITEM)
+    return false if line.match?(BLOCKQUOTE)
+    return false if line.match?(CODE_INDENT)
+    true
   end
 
-  def self.code_block?(lines)
-    lines.any? { |l| l.start_with?("    ", "\t") && !l.strip.empty? }
-  end
-
-  def self.list_block?(lines)
-    lines.first&.match?(/\A\s*(?:[-*]|\d+\.)\s/)
+  def self.top_level_list_item?(el)
+    el.is_a?(String) && el.match?(LIST_ITEM) && !el.match?(/\A\s/)
   end
 end
