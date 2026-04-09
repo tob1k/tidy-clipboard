@@ -16,4 +16,6 @@ Gem::Specification.new do |spec|
   spec.executables = ["tidy-clipboard"]
 
   spec.require_paths = ["lib"]
+
+  spec.add_development_dependency "rspec", "~> 3.0"
 end
