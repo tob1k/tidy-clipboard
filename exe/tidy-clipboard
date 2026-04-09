@@ -6,3 +6,4 @@ require_relative "../lib/tidy_claude_clipboard"
 text = IO.popen("pbpaste", &:read)
 result = TidyClaudeClipboard.tidy(text)
 IO.popen("pbcopy", "w") { |io| io.write(result) }
+$stderr.puts "Clipboard tidied"
